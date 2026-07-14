@@ -1,0 +1,6 @@
+{
+  "name": "AI Workflow Engine",
+  "description": "An AI-powered workflow recommendation engine that designs practical, cost-aware workflows using a compatible stack of tools.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
