@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/src/lib/supabase/server';
+import { createAdminClient } from '@/src/lib/supabase/admin';
 
 export async function DELETE(
   request: Request,
@@ -11,25 +11,23 @@ export async function DELETE(
       return NextResponse.json({ error: 'Missing workflow ID.' }, { status: 400 });
     }
 
-    const supabase = await createClient();
+    const supabaseAdmin = createAdminClient();
     
     // Perform database deletion
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('workflows')
       .delete()
       .eq('id', id);
 
     if (error) {
-      console.warn('[API Workflows DELETE] Database deletion error:', error.message);
-      return NextResponse.json({
-        success: true,
-        warning: 'Database unconfigured or unreachable. Deletion simulated.'
-      });
+      console.error('[API Workflows DELETE] Database deletion error:', error.message);
+      return NextResponse.json({ error: 'Failed to delete workflow from library.' }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true }, { status: 200 });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('[API Workflows DELETE] Unexpected error:', err.message);
+    return NextResponse.json({ error: 'An unexpected server error occurred.' }, { status: 500 });
   }
 }
 
@@ -43,8 +41,8 @@ export async function GET(
       return NextResponse.json({ error: 'Missing workflow ID.' }, { status: 400 });
     }
 
-    const supabase = await createClient();
-    const { data, error } = await supabase
+    const supabaseAdmin = createAdminClient();
+    const { data, error } = await supabaseAdmin
       .from('workflows')
       .select(`
         *,
@@ -62,7 +60,7 @@ export async function GET(
       id: data.id,
       title: data.title,
       description: data.summary,
-      category: data.category,
+      category: data.category || 'custom',
       difficulty: data.difficulty,
       automationLevel: data.automation_level,
       estimatedCostMin: data.total_cost || 0,
@@ -94,8 +92,9 @@ export async function GET(
         }))
     };
 
-    return NextResponse.json(mapped);
+    return NextResponse.json(mapped, { status: 200 });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('[API Workflows ID GET] Unexpected error:', err.message);
+    return NextResponse.json({ error: 'An unexpected server error occurred.' }, { status: 500 });
   }
 }

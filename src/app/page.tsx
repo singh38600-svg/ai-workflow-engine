@@ -42,6 +42,7 @@ export default function App() {
   // Loaded database state
   const [toolsList, setToolsList] = useState<Tool[]>([]);
   const [savedWorkflows, setSavedWorkflows] = useState<Workflow[]>([]);
+  const [savedWorkflowsError, setSavedWorkflowsError] = useState<string | null>(null);
   const [activeWorkflow, setActiveWorkflow] = useState<Workflow | null>(null);
 
   // UI state
@@ -55,6 +56,13 @@ export default function App() {
     fetchTools();
     fetchSavedWorkflows();
   }, []);
+
+  // Fetch saved workflows whenever 'saved' view opens
+  useEffect(() => {
+    if (currentTab === 'saved') {
+      fetchSavedWorkflows();
+    }
+  }, [currentTab]);
 
   const fetchTools = async () => {
     try {
@@ -70,13 +78,25 @@ export default function App() {
 
   const fetchSavedWorkflows = async () => {
     try {
+      setSavedWorkflowsError(null);
       const res = await fetch('/api/workflows');
       if (res.ok) {
         const data = await res.json();
         setSavedWorkflows(data);
+      } else {
+        const errText = await res.text();
+        let errMsg = 'Failed to fetch saved workflows.';
+        try {
+          const parsed = JSON.parse(errText);
+          errMsg = parsed.error || errMsg;
+        } catch (_) {
+          errMsg = errText || errMsg;
+        }
+        setSavedWorkflowsError(errMsg);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error("Error loading saved workflows.", e);
+      setSavedWorkflowsError(e.message || "Could not connect to the saved workflows server API.");
     }
   };
 
@@ -125,7 +145,7 @@ export default function App() {
   };
 
   // 2. Action: Save active workflow blueprint
-  const handleSaveWorkflow = async (wf: Workflow) => {
+  const handleSaveWorkflow = async (wf: Workflow): Promise<boolean> => {
     try {
       const res = await fetch('/api/workflows', {
         method: 'POST',
@@ -133,10 +153,13 @@ export default function App() {
         body: JSON.stringify(wf)
       });
       if (res.ok) {
-        fetchSavedWorkflows();
+        await fetchSavedWorkflows();
+        return true;
       }
+      return false;
     } catch (e) {
       console.error("Error saving workflow", e);
+      return false;
     }
   };
 
@@ -619,6 +642,7 @@ export default function App() {
           {currentTab === 'saved' && (
             <SavedWorkflowsView
               workflows={savedWorkflows}
+              error={savedWorkflowsError}
               onSelect={(wf) => {
                 setActiveWorkflow(wf);
                 setTab('home');

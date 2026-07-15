@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS public.workflows (
   id TEXT PRIMARY KEY,
   owner_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE, -- Null means Guest/anonymous
   title TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'custom',
   original_goal TEXT,
   requirements JSONB DEFAULT '{}'::JSONB NOT NULL,
   summary TEXT,

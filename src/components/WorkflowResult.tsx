@@ -5,7 +5,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   TrendingUp,
   Cpu,
@@ -33,7 +33,7 @@ import { Workflow, WorkflowStep, Tool } from '../types';
 interface WorkflowResultProps {
   workflow: Workflow;
   setWorkflow: (wf: Workflow) => void;
-  onSave: (wf: Workflow) => void;
+  onSave: (wf: Workflow) => Promise<boolean>;
   onReplaceTool: (stepId: string, newToolSlug: string) => void;
   onOptimize: (action: 'free' | 'no-code' | 'powerful' | 'privacy') => void;
   toolsCatalogue: Tool[];
@@ -54,17 +54,25 @@ export default function WorkflowResult({
   const [editNotes, setEditNotes] = useState("");
 
   const [isSavingLocal, setIsSavingLocal] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [copiedText, setCopiedText] = useState(false);
 
+  // Reset saved status when active workflow changes
+  useEffect(() => {
+    setIsSaved(false);
+  }, [workflow.id]);
+
   // Trigger Local Save
-  const handleSaveToLibrary = () => {
+  const handleSaveToLibrary = async () => {
     setIsSavingLocal(true);
-    onSave(workflow);
-    setTimeout(() => {
-      setIsSavingLocal(false);
-      alert("Successfully saved workflow blueprint to your local library database!");
-    }, 600);
+    const success = await onSave(workflow);
+    setIsSavingLocal(false);
+    if (success) {
+      setIsSaved(true);
+    } else {
+      alert("Failed to save workflow blueprint. Please verify your connection or try again.");
+    }
   };
 
   // Replace a tool instantly in a step
@@ -202,11 +210,24 @@ export default function WorkflowResult({
             <button
               id="btn-save-workflow"
               onClick={handleSaveToLibrary}
-              disabled={isSavingLocal}
-              className="px-3.5 py-2 border border-slate-200 hover:border-indigo-100 rounded-xl text-xs font-semibold text-slate-600 hover:text-indigo-600 hover:bg-slate-50 flex items-center gap-1.5 transition-all cursor-pointer shadow-sm disabled:opacity-50"
+              disabled={isSavingLocal || isSaved}
+              className={`px-3.5 py-2 border rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm ${
+                isSaved 
+                  ? 'border-emerald-200 bg-emerald-50/50 text-emerald-700 cursor-not-allowed' 
+                  : 'border-slate-200 hover:border-indigo-100 text-slate-600 hover:text-indigo-600 hover:bg-slate-50 disabled:opacity-50'
+              }`}
             >
-              <Save className="w-3.5 h-3.5" />
-              {isSavingLocal ? 'Saving...' : 'Save to Library'}
+              {isSaved ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-600 animate-bounce" />
+                  <span>Saved to Library</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-3.5 h-3.5" />
+                  <span>{isSavingLocal ? 'Saving...' : 'Save to Library'}</span>
+                </>
+              )}
             </button>
             <button
               id="btn-export-instructions"

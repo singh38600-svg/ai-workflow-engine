@@ -1,28 +1,39 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/src/lib/supabase/server';
+import { createAdminClient } from '@/src/lib/supabase/admin';
 
 export async function GET() {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    let userId: string | null = null;
+    try {
+      const userClient = await createClient();
+      const { data: { user } } = await userClient.auth.getUser();
+      if (user) {
+        userId = user.id;
+      }
+    } catch (e) {
+      console.log('[API Workflows GET] Guest user or no active session:', e);
+    }
 
-    let query = supabase.from('workflows').select(`
+    const supabaseAdmin = createAdminClient();
+
+    let query = supabaseAdmin.from('workflows').select(`
       *,
       steps:workflow_steps(*)
     `);
 
-    if (user) {
-      query = query.or(`owner_id.eq.${user.id},visibility.eq.public`);
+    if (userId) {
+      query = query.or(`owner_id.eq.${userId},owner_id.is.null,visibility.eq.public`);
     } else {
-      // Return public workflows for guests
-      query = query.eq('visibility', 'public');
+      // Return public workflows and anonymous guest workflows for guests
+      query = query.or(`owner_id.is.null,visibility.eq.public`);
     }
 
     const { data, error } = await query.order('updated_at', { ascending: false });
 
     if (error) {
-      console.warn('[API Workflows GET] Supabase workflows fetch failed:', error.message);
-      return NextResponse.json([]);
+      console.error('[API Workflows GET] Supabase workflows fetch failed:', error.message);
+      return NextResponse.json({ error: 'Failed to retrieve workflows from library.' }, { status: 500 });
     }
 
     // Map database fields back to frontend fields
@@ -30,7 +41,7 @@ export async function GET() {
       id: wf.id,
       title: wf.title,
       description: wf.summary,
-      category: wf.category,
+      category: wf.category || 'custom',
       difficulty: wf.difficulty,
       automationLevel: wf.automation_level,
       estimatedCostMin: wf.total_cost || 0,
@@ -62,10 +73,10 @@ export async function GET() {
         }))
     }));
 
-    return NextResponse.json(mapped);
+    return NextResponse.json(mapped, { status: 200 });
   } catch (err: any) {
-    console.warn('[API Workflows GET] Error querying workflows, using empty array fallback:', err.message);
-    return NextResponse.json([]);
+    console.error('[API Workflows GET] Error querying workflows:', err.message);
+    return NextResponse.json({ error: 'An unexpected server error occurred.' }, { status: 500 });
   }
 }
 
@@ -76,38 +87,45 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid workflow data.' }, { status: 400 });
     }
 
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    let userId: string | null = null;
+    try {
+      const userClient = await createClient();
+      const { data: { user } } = await userClient.auth.getUser();
+      if (user) {
+        userId = user.id;
+      }
+    } catch (e) {
+      console.log('[API Workflows POST] Guest user or no active session:', e);
+    }
 
     const dbWorkflow = {
       id: wf.id,
-      owner_id: user ? user.id : null,
+      owner_id: userId,
       title: wf.title,
-      original_goal: wf.requirementsSummary || wf.description,
-      summary: wf.description,
-      category: wf.category,
+      original_goal: wf.requirementsSummary || wf.description || '',
+      requirements: wf.requirements || {},
+      summary: wf.description || '',
       total_cost: wf.estimatedCostMin || 0,
       currency: wf.currency || 'USD',
-      difficulty: wf.difficulty,
-      automation_level: wf.automationLevel,
-      privacy_risk: wf.privacyRisk,
+      difficulty: wf.difficulty || 'beginner',
+      automation_level: wf.automationLevel || 'assisted',
+      privacy_risk: wf.privacyRisk || 'Medium',
       visibility: wf.visibility || 'private',
       public_share_token: wf.publicShareToken || null,
+      category: wf.category || 'custom',
       updated_at: new Date().toISOString()
     };
 
+    const supabaseAdmin = createAdminClient();
+
     // Upsert the main workflow record
-    const { error: wfError } = await supabase
+    const { error: wfError } = await supabaseAdmin
       .from('workflows')
       .upsert(dbWorkflow);
 
     if (wfError) {
-      console.warn('[API Workflows POST] Supabase workflow upsert failed:', wfError.message);
-      return NextResponse.json({
-        success: true,
-        workflow: wf,
-        warning: 'Supabase schema not fully migrated. Workflow saved in temporary local session.'
-      });
+      console.error('[API Workflows POST] Supabase workflow upsert failed:', wfError.message);
+      return NextResponse.json({ error: 'Failed to persist workflow blueprint.' }, { status: 500 });
     }
 
     // Save associated steps
@@ -130,19 +148,25 @@ export async function POST(request: Request) {
       }));
 
       // Clear previous steps to allow fresh insertion
-      await supabase.from('workflow_steps').delete().eq('workflow_id', wf.id);
+      const { error: deleteError } = await supabaseAdmin.from('workflow_steps').delete().eq('workflow_id', wf.id);
+      if (deleteError) {
+        console.error('[API Workflows POST] Supabase workflow_steps deletion failed:', deleteError.message);
+        return NextResponse.json({ error: 'Failed to update workflow steps in library.' }, { status: 500 });
+      }
 
-      const { error: stepsError } = await supabase
+      const { error: stepsError } = await supabaseAdmin
         .from('workflow_steps')
         .insert(dbSteps);
 
       if (stepsError) {
-        console.warn('[API Workflows POST] Supabase workflow_steps insert failed:', stepsError.message);
+        console.error('[API Workflows POST] Supabase workflow_steps insert failed:', stepsError.message);
+        return NextResponse.json({ error: 'Failed to insert workflow steps in library.' }, { status: 500 });
       }
     }
 
-    return NextResponse.json({ success: true, workflow: wf });
+    return NextResponse.json({ success: true, workflow: wf }, { status: 201 });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('[API Workflows POST] Unexpected error:', err.message);
+    return NextResponse.json({ error: 'An unexpected server error occurred.' }, { status: 500 });
   }
 }

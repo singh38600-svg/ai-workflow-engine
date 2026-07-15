@@ -13,9 +13,10 @@ interface SavedWorkflowsViewProps {
   workflows: Workflow[];
   onSelect: (wf: Workflow) => void;
   onDelete: (id: string) => void;
+  error?: string | null;
 }
 
-export default function SavedWorkflowsView({ workflows, onSelect, onDelete }: SavedWorkflowsViewProps) {
+export default function SavedWorkflowsView({ workflows, onSelect, onDelete, error }: SavedWorkflowsViewProps) {
   return (
     <div className="p-6 max-w-5xl mx-auto flex flex-col gap-6">
       <div>
@@ -28,7 +29,20 @@ export default function SavedWorkflowsView({ workflows, onSelect, onDelete }: Sa
         </p>
       </div>
 
-      {workflows.length === 0 ? (
+      {error ? (
+        <div className="bg-rose-50 border border-rose-100 rounded-3xl p-10 text-center flex flex-col items-center justify-center gap-3">
+          <div className="w-12 h-12 rounded-full bg-rose-100 flex items-center justify-center text-rose-600 text-xl font-bold">
+            ⚠️
+          </div>
+          <h3 className="font-semibold text-rose-800 text-sm">Library Synchronisation Failed</h3>
+          <p className="text-xs text-rose-600 max-w-sm leading-normal">
+            {error}
+          </p>
+          <p className="text-[11px] text-slate-400 max-w-xs mt-1">
+            Please make sure your Supabase environment variables are correctly configured in your server.
+          </p>
+        </div>
+      ) : workflows.length === 0 ? (
         <div className="bg-white border border-dashed border-slate-200 rounded-3xl p-12 text-center flex flex-col items-center justify-center gap-3">
           <div className="w-12 h-12 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 text-xl font-bold">
             📁
