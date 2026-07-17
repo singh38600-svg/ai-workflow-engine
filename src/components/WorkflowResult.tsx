@@ -65,8 +65,15 @@ export default function WorkflowResult({
 
   // Trigger Local Save
   const handleSaveToLibrary = async () => {
+    if (!workflow.steps || !Array.isArray(workflow.steps) || workflow.steps.length === 0) {
+      alert("This workflow contains no steps and cannot be saved.");
+      return;
+    }
     setIsSavingLocal(true);
-    const success = await onSave(workflow);
+    const success = await onSave({
+      ...workflow,
+      steps: workflow.steps
+    });
     setIsSavingLocal(false);
     if (success) {
       setIsSaved(true);

@@ -147,7 +147,30 @@ Generate a valid JSON object matching this structure exactly (DO NOT include any
         let cleanedJson1 = res1Text.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
         const extracted: WorkflowRequirements = JSON.parse(cleanedJson1);
 
-        console.log(`[Workflow Gen Route] Requirements extracted. Processing ${extracted.tasks?.length || 0} tasks.`);
+        // Safe temporary diagnostics
+        console.info("[API Workflow Generate Diagnostics] Call 1 keys:", Object.keys(extracted));
+
+        // Dynamically find generated nodes under various potential properties
+        const tasksArrayRaw = extracted.tasks || (extracted as any).steps || (extracted as any).workflowSteps || (extracted as any).workflow_steps || (extracted as any).nodes || (extracted as any).actions || (extracted as any).toolchain || [];
+        console.info("[API Workflow Generate Diagnostics] Call 1 tasksArray raw exists:", !!tasksArrayRaw, "Array size:", Array.isArray(tasksArrayRaw) ? tasksArrayRaw.length : 'not an array');
+
+        const tasksArray = (Array.isArray(tasksArrayRaw) ? tasksArrayRaw : []).map((t: any, index: number) => {
+          return {
+            id: t.id || `task-${index + 1}`,
+            order: t.order || t.position || index + 1,
+            title: t.title || t.stepTitle || t.name || `Task ${index + 1}`,
+            purpose: t.purpose || t.explanation || t.description || 'Process data',
+            requiredCapabilities: Array.isArray(t.requiredCapabilities) ? t.requiredCapabilities : [],
+            inputType: Array.isArray(t.inputType) ? t.inputType : Array.isArray(t.input) ? t.input : [t.input || t.inputType || 'JSON'],
+            outputType: Array.isArray(t.outputType) ? t.outputType : Array.isArray(t.output) ? t.output : [t.output || t.outputType || 'JSON'],
+            preferredToolCategories: Array.isArray(t.preferredToolCategories) ? t.preferredToolCategories : [],
+            requiresApi: t.requiresApi !== undefined ? t.requiresApi : true,
+            requiresWebhook: t.requiresWebhook !== undefined ? t.requiresWebhook : false,
+            requiresHumanApproval: t.requiresHumanApproval !== undefined ? t.requiresHumanApproval : false
+          };
+        });
+
+        console.info("[API Workflow Generate Diagnostics] Call 1 tasksArray count:", tasksArray.length);
 
         // Deterministic server-side ranking & selection
         const workflowSteps: WorkflowStep[] = [];
@@ -156,7 +179,7 @@ Generate a valid JSON object matching this structure exactly (DO NOT include any
         let totalCostMax = 0;
         let maxDifficultyScore = 1;
 
-        for (const task of (extracted.tasks || [])) {
+        for (const task of tasksArray) {
           const scoredTools = rankToolsForTask(task, extracted, toolsCatalogue, prevToolSlug);
           if (scoredTools.length === 0) continue;
 
@@ -281,9 +304,12 @@ Output a valid JSON matching this exact structure (NO markdown block fences, com
 
         // Merge AI explanations into deterministic steps
         const finalSteps = workflowSteps.map(step => {
-          const matchingAi = explanation.steps?.find(aiStep =>
+          const explanationSteps = explanation.steps || (explanation as any).tasks || (explanation as any).workflowSteps || (explanation as any).workflow_steps || (explanation as any).nodes || (explanation as any).actions || (explanation as any).toolchain || [];
+          const matchingAi = (Array.isArray(explanationSteps) ? explanationSteps : []).find((aiStep: any) =>
             aiStep.taskId === step.id ||
-            (aiStep.stepTitle && aiStep.stepTitle.toLowerCase().includes(step.title.toLowerCase()))
+            aiStep.id === step.id ||
+            (aiStep.stepTitle && aiStep.stepTitle.toLowerCase().includes(step.title.toLowerCase())) ||
+            (aiStep.title && aiStep.title.toLowerCase().includes(step.title.toLowerCase()))
           );
 
           if (matchingAi) {

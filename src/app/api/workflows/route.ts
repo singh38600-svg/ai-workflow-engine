@@ -109,7 +109,21 @@ export async function POST(request: Request) {
   try {
     const wf = await request.json();
     if (!wf || !wf.id) {
-      return NextResponse.json({ error: 'Invalid workflow data.' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'Invalid workflow data.' }, { status: 400 });
+    }
+
+    // Add safe temporary diagnostics
+    console.info("[Workflow Save]", {
+      bodyKeys: Object.keys(wf),
+      receivedStepCount: Array.isArray(wf.steps) ? wf.steps.length : 0
+    });
+
+    // Reject workflows with missing or empty steps
+    if (!wf.steps || !Array.isArray(wf.steps) || wf.steps.length === 0) {
+      return NextResponse.json({
+        success: false,
+        error: "Workflow steps are required"
+      }, { status: 400 });
     }
 
     let userId: string | null = null;
@@ -174,81 +188,91 @@ export async function POST(request: Request) {
 
     if (wfError) {
       console.error('[API Workflows POST] Supabase workflow upsert failed:', wfError.message);
-      return NextResponse.json({ error: 'Failed to persist workflow blueprint.' }, { status: 500 });
+      return NextResponse.json({ success: false, error: 'Failed to persist workflow blueprint.' }, { status: 500 });
     }
 
     // Save associated steps
-    if (wf.steps && wf.steps.length > 0) {
-      const dbSteps = wf.steps.map((step: any, idx: number) => {
-        let dbToolId: string | null = null;
-        if (step.toolId && toolIdMap.has(step.toolId)) {
-          dbToolId = toolIdMap.get(step.toolId) || null;
-        } else if (step.toolSlug && toolIdMap.has(step.toolSlug)) {
-          dbToolId = toolIdMap.get(step.toolSlug) || null;
+    const dbSteps = wf.steps.map((step: any, idx: number) => {
+      let dbToolId: string | null = null;
+      if (step.toolId && toolIdMap.has(step.toolId)) {
+        dbToolId = toolIdMap.get(step.toolId) || null;
+      } else if (step.toolSlug && toolIdMap.has(step.toolSlug)) {
+        dbToolId = toolIdMap.get(step.toolSlug) || null;
+      }
+
+      const compatibilityWithMetadata = {
+        original_compatibility: step.compatibility_to_next || null,
+        frontend_metadata: {
+          toolId: step.toolId || '',
+          toolSlug: step.toolSlug || '',
+          toolName: step.toolName || '',
+          toolLogo: step.toolLogo || '',
+          toolCategory: step.toolCategory || '',
+          whySelected: step.whySelected || '',
+          expectedOutput: step.expectedOutput || '',
+          humanAction: step.humanAction || null,
+          limitationNotes: step.limitationNotes || [],
+          estimatedCost: step.estimatedCost || '',
+          difficulty: step.difficulty || 'beginner',
+          isFree: step.isFree !== undefined ? step.isFree : true,
+          requiresApi: step.requiresApi !== undefined ? step.requiresApi : false,
+          requiresWebhook: step.requiresWebhook !== undefined ? step.requiresWebhook : false,
+          privacyNotes: step.privacyNotes || '',
+          alternatives: step.alternatives || []
         }
+      };
 
-        const compatibilityWithMetadata = {
-          original_compatibility: step.compatibility_to_next || null,
-          frontend_metadata: {
-            toolId: step.toolId || '',
-            toolSlug: step.toolSlug || '',
-            toolName: step.toolName || '',
-            toolLogo: step.toolLogo || '',
-            toolCategory: step.toolCategory || '',
-            whySelected: step.whySelected || '',
-            expectedOutput: step.expectedOutput || '',
-            humanAction: step.humanAction || null,
-            limitationNotes: step.limitationNotes || [],
-            estimatedCost: step.estimatedCost || '',
-            difficulty: step.difficulty || 'beginner',
-            isFree: step.isFree !== undefined ? step.isFree : true,
-            requiresApi: step.requiresApi !== undefined ? step.requiresApi : false,
-            requiresWebhook: step.requiresWebhook !== undefined ? step.requiresWebhook : false,
-            privacyNotes: step.privacyNotes || '',
-            alternatives: step.alternatives || []
-          }
-        };
+      return {
+        id: step.id || `step-${idx + 1}`,
+        workflow_id: wf.id,
+        position: idx + 1,
+        title: step.title,
+        purpose: step.purpose || '',
+        selected_tool_id: dbToolId,
+        alternatives: step.alternatives || [],
+        instructions: step.setupInstructions || [],
+        input_types: step.input ? [step.input] : [],
+        output_types: step.output ? [step.output] : [],
+        compatibility_to_next: compatibilityWithMetadata,
+        human_approval_required: !!step.humanAction,
+        personal_notes: step.personal_notes || null,
+        updated_at: new Date().toISOString()
+      };
+    });
 
-        return {
-          id: step.id || `step-${idx + 1}`,
-          workflow_id: wf.id,
-          position: idx + 1,
-          title: step.title,
-          purpose: step.purpose || '',
-          selected_tool_id: dbToolId,
-          alternatives: step.alternatives || [],
-          instructions: step.setupInstructions || [],
-          input_types: step.input ? [step.input] : [],
-          output_types: step.output ? [step.output] : [],
-          compatibility_to_next: compatibilityWithMetadata,
-          human_approval_required: !!step.humanAction,
-          personal_notes: step.personal_notes || null,
-          updated_at: new Date().toISOString()
-        };
-      });
+    // Clear previous steps to allow fresh insertion
+    const { error: deleteError } = await supabaseAdmin.from('workflow_steps').delete().eq('workflow_id', wf.id);
+    if (deleteError) {
+      console.error('[API Workflows POST] Supabase workflow_steps deletion failed:', deleteError.message);
+      // Clean up newly created/upserted workflow to avoid partial record if it was newly inserted
+      await supabaseAdmin.from('workflows').delete().eq('id', wf.id);
+      return NextResponse.json({ success: false, error: 'Failed to update workflow steps in library.' }, { status: 500 });
+    }
 
-      // Clear previous steps to allow fresh insertion
-      const { error: deleteError } = await supabaseAdmin.from('workflow_steps').delete().eq('workflow_id', wf.id);
-      if (deleteError) {
-        console.error('[API Workflows POST] Supabase workflow_steps deletion failed:', deleteError.message);
-        return NextResponse.json({ error: 'Failed to update workflow steps in library.' }, { status: 500 });
-      }
+    const { error: stepsError } = await supabaseAdmin
+      .from('workflow_steps')
+      .insert(dbSteps);
 
-      const { error: stepsError } = await supabaseAdmin
-        .from('workflow_steps')
-        .insert(dbSteps);
+    if (stepsError) {
+      console.error('[API Workflows POST] Supabase workflow_steps insert failed:', stepsError.message);
+      // Clean up newly created/upserted workflow to avoid partial record
+      await supabaseAdmin.from('workflows').delete().eq('id', wf.id);
+      return NextResponse.json({ success: false, error: 'Failed to insert workflow steps in library.' }, { status: 500 });
+    }
 
-      if (stepsError) {
-        console.error('[API Workflows POST] Supabase workflow_steps insert failed:', stepsError.message);
-        return NextResponse.json({ error: 'Failed to insert workflow steps in library.' }, { status: 500 });
-      }
-    } else {
-      // If wf has no steps or empty steps, delete any old ones
-      const { error: deleteError } = await supabaseAdmin.from('workflow_steps').delete().eq('workflow_id', wf.id);
-      if (deleteError) {
-        console.error('[API Workflows POST] Supabase workflow_steps deletion failed:', deleteError.message);
-        return NextResponse.json({ error: 'Failed to update workflow steps in library.' }, { status: 500 });
-      }
+    // STEP 6: VERIFY DATABASE INSERTION
+    const { data: insertedSteps, error: verifyError } = await supabaseAdmin
+      .from('workflow_steps')
+      .select('*')
+      .eq('workflow_id', wf.id)
+      .order('position', { ascending: true });
+
+    if (verifyError || !insertedSteps || insertedSteps.length !== dbSteps.length) {
+      console.error('[API Workflows POST] Verification failed. Expected row count:', dbSteps.length, 'Actual:', insertedSteps?.length || 0);
+      // Clean up parent workflow and partial steps
+      await supabaseAdmin.from('workflow_steps').delete().eq('workflow_id', wf.id);
+      await supabaseAdmin.from('workflows').delete().eq('id', wf.id);
+      return NextResponse.json({ success: false, error: 'Workflow steps verification failed in library.' }, { status: 500 });
     }
 
     // Fetch the updated/inserted full workflow with steps to return (consistent with GET response format)
