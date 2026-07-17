@@ -296,15 +296,19 @@ Output a valid JSON matching this exact structure (NO markdown block fences, com
   "optimisationSuggestions": ["Refinements to make it free or fast"]
 }`;
 
-        console.log(`[Workflow Gen Route] Call 2: Explaining workflow steps...`);
-        const res2Text = await generateOpenRouterCompletion(call2Prompt, call2System, true);
-        
-        let cleanedJson2 = res2Text.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
-        const explanation: WorkflowExplanation = JSON.parse(cleanedJson2);
+        let explanation: any = {};
+        try {
+          console.log(`[Workflow Gen Route] Call 2: Explaining workflow steps...`);
+          const res2Text = await generateOpenRouterCompletion(call2Prompt, call2System, true);
+          let cleanedJson2 = res2Text.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
+          explanation = JSON.parse(cleanedJson2);
+        } catch (e: any) {
+          console.warn("[Workflow Gen Route] Call 2 failed or returned invalid JSON. Falling back to Call 1 tasks directly. Error:", e.message);
+        }
 
         // Merge AI explanations into deterministic steps
         const finalSteps = workflowSteps.map(step => {
-          const explanationSteps = explanation.steps || (explanation as any).tasks || (explanation as any).workflowSteps || (explanation as any).workflow_steps || (explanation as any).nodes || (explanation as any).actions || (explanation as any).toolchain || [];
+          const explanationSteps = explanation?.steps || (explanation as any)?.tasks || (explanation as any)?.workflowSteps || (explanation as any)?.workflow_steps || (explanation as any)?.nodes || (explanation as any)?.actions || (explanation as any)?.toolchain || [];
           const matchingAi = (Array.isArray(explanationSteps) ? explanationSteps : []).find((aiStep: any) =>
             aiStep.taskId === step.id ||
             aiStep.id === step.id ||
@@ -333,7 +337,7 @@ Output a valid JSON matching this exact structure (NO markdown block fences, com
         const finalWorkflow: Workflow = {
           id: `wf-${Date.now()}-${slugify(extracted.workflowTitle || 'engine')}`,
           title: extracted.workflowTitle || 'AI-Powered Custom Automation',
-          description: explanation.summary || `Tailored custom workflow for: ${goal}`,
+          description: explanation?.summary || `Tailored custom workflow for: ${goal}`,
           category: extracted.category || inferCategoryFromGoal(goal),
           difficulty: finalDifficultyStr as any,
           automationLevel: (extracted.automationLevel === 'fully_automated' ? 'Fully automated' : extracted.automationLevel === 'mostly_automated' ? 'Mostly automated' : 'Semi-automated') as any,
@@ -344,14 +348,29 @@ Output a valid JSON matching this exact structure (NO markdown block fences, com
           humanApprovalRequired: extracted.humanApprovalRequired,
           privacyRisk: (extracted.dataSensitivity === 'highly_sensitive' || extracted.dataSensitivity === 'financial') ? 'High' : extracted.dataSensitivity === 'personal' ? 'Medium' : 'Low',
           steps: finalSteps,
-          overallInstructions: explanation.overallSetupInstructions || ["Setup credentials.", "Connect step triggers."],
-          privacyWarnings: explanation.privacyWarnings || [],
-          riskWarnings: explanation.riskWarnings || [],
-          optimisationSuggestions: explanation.optimisationSuggestions || [],
+          overallInstructions: explanation?.overallSetupInstructions || ["Setup credentials.", "Connect step triggers."],
+          privacyWarnings: explanation?.privacyWarnings || [],
+          riskWarnings: explanation?.riskWarnings || [],
+          optimisationSuggestions: explanation?.optimisationSuggestions || [],
           requirementsSummary: extracted.goalSummary || goal,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         };
+
+        // Before returning, validate that steps exist and are a non-empty array
+        if (!finalWorkflow.steps || !Array.isArray(finalWorkflow.steps) || finalWorkflow.steps.length === 0) {
+          console.error("[Workflow Final Response Error] Generated workflow has no steps.");
+          return NextResponse.json({
+            success: false,
+            error: "Workflow generation returned no steps"
+          }, { status: 500 });
+        }
+
+        // Add safe production diagnostics
+        console.info("[Workflow Final Response]", {
+          stepCount: Array.isArray(finalWorkflow.steps) ? finalWorkflow.steps.length : 0,
+          hasLegacyWorkflowSteps: Array.isArray((finalWorkflow as any).workflowSteps)
+        });
 
         return NextResponse.json(finalWorkflow);
       } catch (err: any) {
@@ -432,7 +451,7 @@ Output a valid JSON matching this exact structure (NO markdown block fences, com
       };
     }
 
-    if (freeToolsOnly) {
+    if (freeToolsOnly && selectedTemplate) {
       selectedTemplate.estimatedCostMin = 0;
       selectedTemplate.estimatedCostMax = 0;
       selectedTemplate.steps = selectedTemplate.steps.map(s => {
@@ -441,6 +460,20 @@ Output a valid JSON matching this exact structure (NO markdown block fences, com
         return s;
       });
     }
+
+    if (!selectedTemplate || !selectedTemplate.steps || !Array.isArray(selectedTemplate.steps) || selectedTemplate.steps.length === 0) {
+      console.error("[Workflow Final Response Error] Fallback template has no steps.");
+      return NextResponse.json({
+        success: false,
+        error: "Workflow generation returned no steps"
+      }, { status: 500 });
+    }
+
+    // Add safe production diagnostics
+    console.info("[Workflow Final Response]", {
+      stepCount: Array.isArray(selectedTemplate.steps) ? selectedTemplate.steps.length : 0,
+      hasLegacyWorkflowSteps: Array.isArray((selectedTemplate as any).workflowSteps)
+    });
 
     selectedTemplate.requirementsSummary = goal;
     return NextResponse.json(selectedTemplate);
