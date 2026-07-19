@@ -192,7 +192,7 @@ function extractNumberedGoalSteps(goal: string): string[] {
 
 
 const ACTION_VERB_SOURCE =
-  'checks?|collects?|fetches?|retrieves?|pulls?|gets?|finds?|identifies?|analy[sz]es?|classifies?|filters?|removes?|scores?|ranks?|selects?|summari[sz]es?|drafts?|writes?|creates?|generates?|designs?|alerts?|notifies?|sends?|asks?|requests?|reviews?|approves?|posts?|publishes?|schedules?|stores?|tracks?|flags?|detects?|monitors?|tailors?|reminds?|extracts?';
+  'checks?|collects?|fetches?|retrieves?|pulls?|gets?|finds?|identifies?|analy[sz]es?|classifies?|filters?|removes?|scores?|ranks?|selects?|summari[sz]es?|drafts?|writes?|creates?|generates?|designs?|alerts?|notifies?|sends?|asks?|requests?|reviews?|approves?|posts?|publishes?|schedules?|stores?|tracks?|flags?|detects?|monitors?|tailors?|records?|logs?|saves?|reminds?|extracts?';
 
 function normalizeApprovalAction(value: string): string {
   const cleaned = cleanTaskSentence(value)
@@ -231,7 +231,7 @@ function extractNaturalGoalSteps(goal: string): string[] {
     .map(cleanTaskSentence)
     .filter(Boolean);
 
-  if (rawClauses.length < 2) return [];
+  if (rawClauses.length === 0) return [];
 
   const expanded: string[] = [];
 
@@ -290,7 +290,7 @@ function extractNaturalGoalSteps(goal: string): string[] {
 
 function extractGoalSteps(goal: string): string[] {
   const numberedSteps = extractNumberedGoalSteps(goal);
-  return numberedSteps.length >= 2
+  return numberedSteps.length >= 1
     ? numberedSteps
     : extractNaturalGoalSteps(goal);
 }
@@ -798,9 +798,10 @@ function normalizeAiTasks(raw: unknown): CanonicalTask[] {
 
 function approvalRequested(
   goal: string,
-  extractedApproval: boolean
+  _extractedApproval: boolean
 ): boolean {
-  return extractedApproval || APPROVAL_PATTERN.test(goal);
+  // Approval is a user-controlled requirement. Never trust an LLM to invent it.
+  return APPROVAL_PATTERN.test(goal);
 }
 
 function isApprovalTask(task: CanonicalTask): boolean {
@@ -902,7 +903,7 @@ function buildCanonicalTasks(
 
   let tasks: CanonicalTask[];
 
-  if (explicitSteps.length >= 2) {
+  if (explicitSteps.length >= 1) {
     tasks = explicitSteps.map((sentence, index) => {
       const metadata = metadataForTask(sentence);
       const aiTask = aiTasks[index];
@@ -940,9 +941,7 @@ function buildCanonicalTasks(
         preferredToolCategories,
         requiresApi: metadata.requiresApi,
         requiresWebhook: metadata.requiresWebhook,
-        requiresHumanApproval:
-          metadata.requiresHumanApproval ||
-          Boolean(aiTask?.requiresHumanApproval)
+        requiresHumanApproval: metadata.requiresHumanApproval
       };
     });
   } else {
@@ -963,9 +962,7 @@ function buildCanonicalTasks(
           task.preferredToolCategories.length > 0
             ? task.preferredToolCategories
             : metadata.preferredToolCategories,
-        requiresHumanApproval:
-          task.requiresHumanApproval ||
-          metadata.requiresHumanApproval
+        requiresHumanApproval: metadata.requiresHumanApproval
       };
     });
   }
@@ -1047,7 +1044,8 @@ function normalizeRequirements(
     frequency:
       typeof raw?.frequency === 'string' ? raw.frequency : null,
     automationLevel: normalizedAutomation,
-    humanApprovalRequired: Boolean(raw?.humanApprovalRequired),
+    // Approval must come only from the user's words, never from an LLM flag.
+    humanApprovalRequired: APPROVAL_PATTERN.test(goal),
     dataSensitivity: normalizedSensitivity,
     inputs: toStringArray(raw?.inputs, []),
     outputs: toStringArray(raw?.outputs, []),
@@ -1224,7 +1222,7 @@ STRICT RULES:
 1. Return exactly one task for every server-detected user action.
 2. Preserve their order and meaning.
 3. Do not invent substitute tasks such as "idea generation" when the user requested filtering, scoring, summarising, approval, design, or publishing.
-4. Human approval must be its own task whenever requested.
+4. Set humanApprovalRequired to true only when the user explicitly asks for approval, review, sign-off, or confirmation. Human approval must be its own task whenever requested.
 5. Any final sending, posting, publishing, or execution action must occur after approval.
 6. Return JSON only.
 
@@ -1243,7 +1241,7 @@ Use this exact shape:
   },
   "frequency": "Daily",
   "automationLevel": "mostly_automated",
-  "humanApprovalRequired": true,
+  "humanApprovalRequired": false,
   "dataSensitivity": "internal",
   "inputs": ["input"],
   "outputs": ["output"],
@@ -1903,7 +1901,7 @@ Use this exact structure:
           expectedOutput:
             'Successful task transition status.',
           humanAction:
-            index === 2
+            index === 2 && APPROVAL_PATTERN.test(goal)
               ? 'Review the final result before acting.'
               : null,
           limitationNotes:
@@ -1941,7 +1939,7 @@ Use this exact structure:
         estimatedCostMax: freeToolsOnly ? 0 : 1000,
         currency: 'INR',
         setupTimeEstimate: '35 minutes',
-        humanApprovalRequired: true,
+        humanApprovalRequired: APPROVAL_PATTERN.test(goal),
         privacyRisk: 'Medium',
         steps,
         overallInstructions: [
