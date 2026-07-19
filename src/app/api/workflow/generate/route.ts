@@ -42,7 +42,7 @@ type TaskMetadata = {
 };
 
 const APPROVAL_PATTERN =
-  /\b(human approval|approval gate|manual approval|approve before|review before|approve or reject|sign[- ]?off|verification gate|never publish without(?: human)? approval|asks?(?: me| the user| a human)? for approval|asks?(?: me| the user| a human)? to approve|approval before (?:posting|publishing|sending)|approve(?: it| this| the response)? before (?:posting|publishing|sending))\b/i;
+  /\b(human approval|approval gate|manual approval|my approval|user approval|manager approval|client approval|approval from (?:me|the user|a human|a manager|the client)|approve before|review before|approve or reject|sign[- ]?off|verification gate|never publish without(?: human)? approval|asks?(?: me| the user| a human)? for (?:my |the user's |user )?approval|asks?(?: me| the user| a human)? to approve|requests?(?: my| the user's| user| human| manager| client)? approval|waits? for (?:my |the user's |user |human |manager |client )?approval|approval before (?:posting|publishing|sending)|approve(?: it| this| the response)? before (?:posting|publishing|sending)|only (?:send|post|publish|run|execute)\w* (?:the )?approved|(?:send|post|publish|run|execute)\w* only (?:the )?approved)\b/i;
 
 const PUBLISH_PATTERN =
   /^\s*(?:post|publish|schedule|queue)\b.*\b(?:linkedin|social|content|blog|tweet|video|carousel)\b/i;
